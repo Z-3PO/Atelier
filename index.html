@@ -411,8 +411,8 @@ details.adv[open]>summary svg{transform:rotate(90deg)}
    Zane: you may hard-code DEFAULT_ENDPOINT below before pushing to GitHub so
    the designer doesn't have to paste anything. The Settings modal overrides it.
    ============================================================================ */
-const DEFAULT_ENDPOINT = "https://leonardo-proxy.zanewaylon.workers.dev/"; // e.g. "https://leonardo-proxy.yourname.workers.dev"
-const DEFAULT_TOKEN    = "40b8243c-f8bf-4451-a4d3-a864ef12b048"; // matches APP_TOKEN in the worker, if you set one
+const DEFAULT_ENDPOINT = ""; // e.g. "https://leonardo-proxy.yourname.workers.dev"
+const DEFAULT_TOKEN    = ""; // matches APP_TOKEN in the worker, if you set one
 
 /* ---- tiny storage shim: works on GitHub Pages, degrades gracefully elsewhere ---- */
 const store = (()=>{ let mem={}; let ok=true;
@@ -670,9 +670,17 @@ async function createGeneration({model, parameters, label, prompt, count}){
   const job = newJob({label, prompt, model, count: count||1});
   try{
     const res = await api("/v2/generations", {method:"POST", body:{model, public:false, parameters}});
-    if(!res || !res.generationId) throw new Error("No generationId returned.");
-    job.genId = res.generationId;
-    if(res.apiCreditCost!=null) job.cost = res.apiCreditCost;
+    // Leonardo returns the id under different keys depending on endpoint/model.
+    const j = (res && (res.sdGenerationJob || res.generations_by_pk)) || res || {};
+    const genId = j.generationId || j.id || (res && (res.generationId || res.id));
+    if(!genId){
+      // Some failures come back as HTTP 200 with an error body — surface it verbatim.
+      const detail = (res && (res.error||res.message||res.detail)) || (res ? JSON.stringify(res).slice(0,280) : "empty response");
+      throw new Error(typeof detail==="string" ? detail : JSON.stringify(detail));
+    }
+    job.genId = genId;
+    const cost = (j.apiCreditCost!=null ? j.apiCreditCost : (res && res.apiCreditCost));
+    if(cost!=null) job.cost = cost;
     saveHistory(); renderCanvas();
     pollJob(job);
   }catch(e){
